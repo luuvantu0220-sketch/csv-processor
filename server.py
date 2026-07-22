@@ -1,112 +1,112 @@
 import os
-import zipfile
 from flask import Flask, request, send_file
 
 app = Flask(__name__)
 
 @app.route('/upload-and-process', methods=['POST'])
 def upload_and_process():
-    if not request.files:
+    if 'file' not in request.files:
         return {'error': 'Không tìm thấy file gửi lên'}, 400
     
-    processed_files = []
-    
-    # Lặp qua tất cả các file được gửi lên từ n8n (bất kể tên file_0, file_1,...)
-    for key, file in request.files.items():
-        if file.filename == '':
-            continue
-            
-        filename = file.filename
-        name, ext = os.path.splitext(filename)
-        input_path = os.path.join('/tmp', f"{key}_{filename}")
-        output_filename = f"{name}_Da_Xu_Ly.csv"
-        output_path = os.path.join('/tmp', output_filename)
+    file = request.files['file']
+    if file.filename == '':
+        return {'error': 'Chưa chọn file'}, 400
 
-        file.save(input_path)
+    filename = file.filename
+    name, ext = os.path.splitext(filename)
+    input_path = os.path.join('/tmp', filename)
+    output_filename = f"{name}_Da_Xu_Ly.csv"
+    output_path = os.path.join('/tmp', output_filename)
 
-        try:
-            lines = []
-            for enc in ['utf-8', 'utf-16le', 'utf-16', 'latin-1']:
-                try:
-                    with open(input_path, 'r', encoding=enc) as f:
-                        lines = [line.rstrip('\r\n') for line in f]
-                    break
-                except Exception:
-                    continue
+    file.save(input_path)
 
-            if not lines or len(lines) < 3:
+    try:
+        lines = []
+        for enc in ['utf-8', 'utf-16le', 'utf-16', 'latin-1']:
+            try:
+                with open(input_path, 'r', encoding=enc) as f:
+                    lines = [line.rstrip('\r\n') for line in f]
+                break
+            except Exception:
                 continue
 
-            delimiter = ','
-            if '\t' in lines[2]: 
-                delimiter = '\t'
-            elif ';' in lines[2]: 
-                delimiter = ';'
+        if not lines or len(lines) < 3:
+            return {'error': 'File rỗng hoặc ít hơn 3 dòng.'}, 400
 
-            processed = []
+        delimiter = ','
+        if '\t' in lines[2]: 
+            delimiter = '\t'
+        elif ';' in lines[2]: 
+            delimiter = ';'
 
-            # 1. Giữ 3 dòng tiêu đề đầu tiên và chèn 2 cột rỗng trước/sau cột B
-            for i in range(min(3, len(lines))):
-                parts = lines[i].split(delimiter)
-                parts.insert(1, "")
-                parts.insert(3, "")
-                processed.append(delimiter.join(parts))
+        # --- BƯỚC 0: THÊM CÔNG THỨC EXCEL NGAY SAU CỘT UN (INDEX 6) TRƯỚC KHI XỬ LÝ KHÁC ---
+        modified_lines = []
+        
+        # Xử lý 3 dòng tiêu đề đầu tiên
+        for i in range(min(3, len(lines))):
+            parts = lines[i].split(delimiter)
+            if len(parts) > 6:
+                # Đặt tên tiêu đề ở dòng thứ 3 (index 2), các dòng tiêu đề trên để trống
+                header_val = "Un_Dev" if i == 2 else ""
+                parts.insert(7, header_val)
+            modified_lines.append(delimiter.join(parts))
+            
+        # Xử lý các dòng dữ liệu từ dòng 4 trở đi
+        for i in range(3, len(lines)):
+            if not lines[i].strip():
+                modified_lines.append(lines[i])
+                continue
+            parts = lines[i].split(delimiter)
+            if len(parts) > 6:
+                row_num = i + 1  # Số dòng trong Excel (dòng 4 tương ứng i=3)
+                formula = f"=MAX(ABS(C{row_num}-F{row_num}), ABS(D{row_num}-F{row_num}), ABS(E{row_num}-F{row_num}))/F{row_num}*100"
+                parts.insert(7, formula)
+            modified_lines.append(delimiter.join(parts))
 
-            # 2. Tạo dòng thứ 4: Đếm từ 1 -> 81 bắt đầu từ ô C4
-            sample_parts = lines[2].split(delimiter)
-            total_cols = len(sample_parts) + 2
-            row4 = [""] * total_cols
-            count = 1
-            for col_idx in range(2, len(row4)):
-                if count <= 81:
-                    row4[col_idx] = str(count)
-                    count += 1
-            processed.append(delimiter.join(row4))
+        processed = []
 
-            # 3. Xử lý các dòng dữ liệu từ dòng 5 trở đi
-            stt = 1
-            for i in range(3, len(lines)):
-                if not lines[i].strip():
-                    continue
-                parts = lines[i].split(delimiter)
-                parts.insert(1, str(stt))
-                parts.insert(3, str(stt))
-                processed.append(delimiter.join(parts))
-                stt += 1
+        # 1. Giữ 3 dòng tiêu đề đầu tiên và chèn 2 cột rỗng trước/sau cột B
+        for i in range(min(3, len(modified_lines))):
+            parts = modified_lines[i].split(delimiter)
+            parts.insert(1, "")
+            parts.insert(3, "")
+            processed.append(delimiter.join(parts))
 
-            # 4. Ghi file kết quả
-            with open(output_path, 'w', encoding='utf-8-sig') as f:
-                f.write('\n'.join(processed))
-                
-            processed_files.append(output_path)
+        # 2. Tạo dòng thứ 4: Đếm từ 1 -> 81 bắt đầu từ ô C4
+        sample_parts = modified_lines[2].split(delimiter)
+        total_cols = len(sample_parts) + 2
+        row4 = [""] * total_cols
+        count = 1
+        for col_idx in range(2, len(row4)):
+            if count <= 81:
+                row4[col_idx] = str(count)
+                count += 1
+        processed.append(delimiter.join(row4))
 
-        except Exception as e:
-            continue
+        # 3. Xử lý các dòng dữ liệu từ dòng 5 trở đi
+        stt = 1
+        for i in range(3, len(modified_lines)):
+            if not modified_lines[i].strip():
+                continue
+            parts = modified_lines[i].split(delimiter)
+            parts.insert(1, str(stt))
+            parts.insert(3, str(stt))
+            processed.append(delimiter.join(parts))
+            stt += 1
 
-    if not processed_files:
-        return {'error': 'Không có file nào được xử lý thành công'}, 500
+        # 4. Ghi file kết quả
+        with open(output_path, 'w', encoding='utf-8-sig') as f:
+            f.write('\n'.join(processed))
 
-    # Nếu chỉ có 1 file, trả về trực tiếp file đó
-    if len(processed_files) == 1:
         return send_file(
-            processed_files[0], 
+            output_path, 
             as_attachment=True, 
-            download_name=os.path.basename(processed_files[0]),
+            download_name=output_filename,
             mimetype='text/csv'
         )
-    
-    # Nếu có nhiều file được xử lý, nén lại thành 1 file ZIP trả về để n8n nhận trọn gói gọn gàng
-    zip_path = os.path.join('/tmp', 'Tat_Ca_File_Da_Xu_Ly.zip')
-    with zipfile.ZipFile(zip_path, 'w') as zipf:
-        for file_path in processed_files:
-            zipf.write(file_path, os.path.basename(file_path))
-            
-    return send_file(
-        zip_path,
-        as_attachment=True,
-        download_name='Tat_Ca_File_Da_Xu_Ly.zip',
-        mimetype='application/zip'
-    )
+
+    except Exception as e:
+        return {'error': f"Lỗi xử lý file: {str(e)}"}, 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
