@@ -39,40 +39,39 @@ def upload_and_process():
         elif ';' in lines[2]: 
             delimiter = ';'
 
-        # --- BƯỚC 0: THÊM CÔNG THỨC EXCEL NGAY SAU CỘT UN (INDEX 6) TRƯỚC KHI XỬ LÝ KHÁC ---
+        # Tìm vị trí cột UN dựa vào dòng tiêu đề (lines[2])
+        header_parts = lines[2].split(delimiter)
+        un_idx = 6  # Mặc định là cột G (index 6) nếu không tìm thấy tên
+        for idx, val in enumerate(header_parts):
+            if val.strip().upper() == 'UN':
+                un_idx = idx
+                break
+
+        # --- BƯỚC 1: CHÈN CÔNG THỨC THẲNG VÀO CỘT UN TRƯỚC KHI THÊM HÀNG/CỘT ---
         modified_lines = []
-        
-        # Xử lý 3 dòng tiêu đề đầu tiên
-        for i in range(min(3, len(lines))):
-            parts = lines[i].split(delimiter)
-            if len(parts) > 6:
-                # Đặt tên tiêu đề ở dòng thứ 3 (index 2), các dòng tiêu đề trên để trống
-                header_val = "Un_Dev" if i == 2 else ""
-                parts.insert(7, header_val)
-            modified_lines.append(delimiter.join(parts))
-            
-        # Xử lý các dòng dữ liệu từ dòng 4 trở đi
-        for i in range(3, len(lines)):
-            if not lines[i].strip():
-                modified_lines.append(lines[i])
+        for i, line in enumerate(lines):
+            if not line.strip():
+                modified_lines.append(line)
                 continue
-            parts = lines[i].split(delimiter)
-            if len(parts) > 6:
-                row_num = i + 1  # Số dòng trong Excel (dòng 4 tương ứng i=3)
-                formula = f"=MAX(ABS(C{row_num}-F{row_num}), ABS(D{row_num}-F{row_num}), ABS(E{row_num}-F{row_num}))/F{row_num}*100"
-                parts.insert(7, formula)
+            parts = line.split(delimiter)
+            # Chỉ chèn công thức cho các dòng dữ liệu (từ dòng 4 Excel trở đi, tức index >= 3)
+            if i >= 3:
+                if len(parts) > un_idx:
+                    row_num = i + 1  # Số dòng trong Excel (index 3 là dòng 4)
+                    formula = f"=MAX(ABS(C{row_num}-F{row_num}), ABS(D{row_num}-F{row_num}), ABS(E{row_num}-F{row_num}))/F{row_num}*100"
+                    parts[un_idx] = formula
             modified_lines.append(delimiter.join(parts))
 
         processed = []
 
-        # 1. Giữ 3 dòng tiêu đề đầu tiên và chèn 2 cột rỗng trước/sau cột B
+        # --- BƯỚC 2: Giữ 3 dòng tiêu đề đầu tiên và chèn 2 cột rỗng trước/sau cột B ---
         for i in range(min(3, len(modified_lines))):
             parts = modified_lines[i].split(delimiter)
             parts.insert(1, "")
             parts.insert(3, "")
             processed.append(delimiter.join(parts))
 
-        # 2. Tạo dòng thứ 4: Đếm từ 1 -> 81 bắt đầu từ ô C4
+        # --- BƯỚC 3: Tạo dòng thứ 4: Đếm từ 1 -> 81 bắt đầu từ ô C4 ---
         sample_parts = modified_lines[2].split(delimiter)
         total_cols = len(sample_parts) + 2
         row4 = [""] * total_cols
@@ -83,7 +82,7 @@ def upload_and_process():
                 count += 1
         processed.append(delimiter.join(row4))
 
-        # 3. Xử lý các dòng dữ liệu từ dòng 5 trở đi
+        # --- BƯỚC 4: Xử lý các dòng dữ liệu từ dòng 5 trở đi (thêm STT) ---
         stt = 1
         for i in range(3, len(modified_lines)):
             if not modified_lines[i].strip():
@@ -94,7 +93,7 @@ def upload_and_process():
             processed.append(delimiter.join(parts))
             stt += 1
 
-        # 4. Ghi file kết quả
+        # --- BƯỚC 5: Ghi file kết quả ---
         with open(output_path, 'w', encoding='utf-8-sig') as f:
             f.write('\n'.join(processed))
 
