@@ -22,7 +22,6 @@ def upload_and_process():
     file.save(input_path)
 
     try:
-        # Tự động nhận diện ký tự phân cách (delimiter)
         with open(input_path, 'r', encoding='utf-8-sig', errors='ignore') as f:
             sample_text = f.read(2048)
         
@@ -32,7 +31,6 @@ def upload_and_process():
         elif ';' in sample_text:
             delimiter = ';'
 
-        # Đọc toàn bộ file CSV bằng csv.reader
         rows = []
         encodings = ['utf-8-sig', 'utf-16le', 'utf-16', 'latin-1']
         success = False
@@ -50,26 +48,10 @@ def upload_and_process():
         if not success or len(rows) < 3:
             return {'error': 'File rỗng hoặc ít hơn 3 dòng.'}, 400
 
-        # Tìm vị trí cột UN dựa vào dòng tiêu đề (rows[2])
-        header = rows[2] if len(rows) > 2 else []
-        un_idx = 6  # Mặc định cột G nếu không tìm thấy
-        for idx, val in enumerate(header):
-            if val.strip().upper() == 'UN':
-                un_idx = idx
-                break
-
-        # --- BƯỚC 1: CHÈN CÔNG THỨC THẲNG VÀO CỘT UN (Dùng dấu ngoặc kép để Excel không tách cột) ---
-        for i in range(3, len(rows)):
-            if not rows[i] or not any(rows[i]):
-                continue
-            if len(rows[i]) > un_idx:
-                row_num = i + 1  # Số dòng trong Excel
-                formula = f"=MAX(ABS(C{row_num}-F{row_num}), ABS(D{row_num}-F{row_num}), ABS(E{row_num}-F{row_num}))/F{row_num}*100"
-                rows[i][un_idx] = formula
-
+        # --- BƯỚC 1: XÂY DỰNG CẤU TRÚC BẢNG (THÊM HÀNG VÀ CỘT TRƯỚC) ---
         processed_rows = []
 
-        # --- BƯỚC 2: Giữ 3 dòng tiêu đề đầu tiên và chèn 2 cột rỗng trước/sau cột B ---
+        # 1. Xử lý 3 dòng tiêu đề đầu tiên (Chèn 2 cột rỗng vào index 1 và index 3)
         for i in range(min(3, len(rows))):
             r = list(rows[i])
             while len(r) <= 1:
@@ -78,7 +60,7 @@ def upload_and_process():
             r.insert(3, "")
             processed_rows.append(r)
 
-        # --- BƯỚC 3: Tạo dòng thứ 4: Đếm từ 1 -> 81 bắt đầu từ ô C4 ---
+        # 2. Tạo dòng thứ 4: Đếm từ 1 -> 81 bắt đầu từ ô C4
         sample_r = list(rows[2]) if len(rows) > 2 else []
         total_cols = len(sample_r) + 2
         row4 = [""] * total_cols
@@ -89,7 +71,7 @@ def upload_and_process():
                 count += 1
         processed_rows.append(row4)
 
-        # --- BƯỚC 4: Xử lý các dòng dữ liệu từ dòng 5 trở đi (thêm STT vào trước cột B và trước cột D) ---
+        # 3. Xử lý các dòng dữ liệu từ dòng 5 trở đi (thêm STT vào index 1 và index 3)
         stt = 1
         for i in range(3, len(rows)):
             if not rows[i] or not any(rows[i]):
@@ -100,7 +82,27 @@ def upload_and_process():
             processed_rows.append(r)
             stt += 1
 
-        # --- BƯỚC 5: Ghi file kết quả bằng csv.writer (tự động wrap ngoặc kép các trường chứa dấu phẩy) ---
+        # --- BƯỚC 2: ĐIỀN CÔNG THỨC VÀO ĐÚNG CỘT UN VỚI TỌA ĐỘ CỘT MỚI ---
+        header = processed_rows[2] if len(processed_rows) > 2 else []
+        un_idx = -1
+        for idx, val in enumerate(header):
+            if val.strip().upper() == 'UN':
+                un_idx = idx
+                break
+
+        if un_idx != -1:
+            # Dữ liệu bắt đầu từ index 4 (tương ứng dòng 5 trong Excel, vì dòng 4 là hàng đếm số 1-81)
+            for i in range(4, len(processed_rows)):
+                r = processed_rows[i]
+                if not r or not any(r):
+                    continue
+                if len(r) > un_idx:
+                    row_num = i + 1  # Số dòng thực tế trên Excel (5, 6, 7...)
+                    # Sử dụng đúng tọa độ cột sau khi dịch chuyển: E (UA), F (UB), G (UC), H (UAvg)
+                    formula = f"=MAX(ABS(E{row_num}-H{row_num}), ABS(F{row_num}-H{row_num}), ABS(G{row_num}-H{row_num}))/H{row_num}*100"
+                    r[un_idx] = formula
+
+        # --- BƯỚC 3: GHI FILE KẾT QUẢ ---
         with open(output_path, 'w', encoding='utf-8-sig', newline='') as f:
             writer = csv.writer(f, delimiter=delimiter, quoting=csv.QUOTE_MINIMAL)
             writer.writerows(processed_rows)
