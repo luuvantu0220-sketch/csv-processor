@@ -1,4 +1,5 @@
 import os
+import csv
 from flask import Flask, request, send_file
 
 app = Flask(__name__)
@@ -21,81 +22,88 @@ def upload_and_process():
     file.save(input_path)
 
     try:
-        lines = []
-        for enc in ['utf-8', 'utf-16le', 'utf-16', 'latin-1']:
+        # Tự động nhận diện ký tự phân cách (delimiter)
+        with open(input_path, 'r', encoding='utf-8-sig', errors='ignore') as f:
+            sample_text = f.read(2048)
+        
+        delimiter = ','
+        if '\t' in sample_text:
+            delimiter = '\t'
+        elif ';' in sample_text:
+            delimiter = ';'
+
+        # Đọc toàn bộ file CSV bằng csv.reader
+        rows = []
+        encodings = ['utf-8-sig', 'utf-16le', 'utf-16', 'latin-1']
+        success = False
+        for enc in encodings:
             try:
                 with open(input_path, 'r', encoding=enc) as f:
-                    lines = [line.rstrip('\r\n') for line in f]
-                break
+                    reader = csv.reader(f, delimiter=delimiter)
+                    rows = list(reader)
+                if rows:
+                    success = True
+                    break
             except Exception:
                 continue
 
-        if not lines or len(lines) < 3:
+        if not success or len(rows) < 3:
             return {'error': 'File rỗng hoặc ít hơn 3 dòng.'}, 400
 
-        delimiter = ','
-        if '\t' in lines[2]: 
-            delimiter = '\t'
-        elif ';' in lines[2]: 
-            delimiter = ';'
-
-        # Tìm vị trí cột UN dựa vào dòng tiêu đề (lines[2])
-        header_parts = lines[2].split(delimiter)
-        un_idx = 6  # Mặc định là cột G (index 6) nếu không tìm thấy tên
-        for idx, val in enumerate(header_parts):
+        # Tìm vị trí cột UN dựa vào dòng tiêu đề (rows[2])
+        header = rows[2] if len(rows) > 2 else []
+        un_idx = 6  # Mặc định cột G nếu không tìm thấy
+        for idx, val in enumerate(header):
             if val.strip().upper() == 'UN':
                 un_idx = idx
                 break
 
-        # --- BƯỚC 1: CHÈN CÔNG THỨC THẲNG VÀO CỘT UN TRƯỚC KHI THÊM HÀNG/CỘT ---
-        modified_lines = []
-        for i, line in enumerate(lines):
-            if not line.strip():
-                modified_lines.append(line)
+        # --- BƯỚC 1: CHÈN CÔNG THỨC THẲNG VÀO CỘT UN (Dùng dấu ngoặc kép để Excel không tách cột) ---
+        for i in range(3, len(rows)):
+            if not rows[i] or not any(rows[i]):
                 continue
-            parts = line.split(delimiter)
-            # Chỉ chèn công thức cho các dòng dữ liệu (từ dòng 4 Excel trở đi, tức index >= 3)
-            if i >= 3:
-                if len(parts) > un_idx:
-                    row_num = i + 1  # Số dòng trong Excel (index 3 là dòng 4)
-                    formula = f"=MAX(ABS(C{row_num}-F{row_num}), ABS(D{row_num}-F{row_num}), ABS(E{row_num}-F{row_num}))/F{row_num}*100"
-                    parts[un_idx] = formula
-            modified_lines.append(delimiter.join(parts))
+            if len(rows[i]) > un_idx:
+                row_num = i + 1  # Số dòng trong Excel
+                formula = f"=MAX(ABS(C{row_num}-F{row_num}), ABS(D{row_num}-F{row_num}), ABS(E{row_num}-F{row_num}))/F{row_num}*100"
+                rows[i][un_idx] = formula
 
-        processed = []
+        processed_rows = []
 
         # --- BƯỚC 2: Giữ 3 dòng tiêu đề đầu tiên và chèn 2 cột rỗng trước/sau cột B ---
-        for i in range(min(3, len(modified_lines))):
-            parts = modified_lines[i].split(delimiter)
-            parts.insert(1, "")
-            parts.insert(3, "")
-            processed.append(delimiter.join(parts))
+        for i in range(min(3, len(rows))):
+            r = list(rows[i])
+            while len(r) <= 1:
+                r.append("")
+            r.insert(1, "")
+            r.insert(3, "")
+            processed_rows.append(r)
 
         # --- BƯỚC 3: Tạo dòng thứ 4: Đếm từ 1 -> 81 bắt đầu từ ô C4 ---
-        sample_parts = modified_lines[2].split(delimiter)
-        total_cols = len(sample_parts) + 2
+        sample_r = list(rows[2]) if len(rows) > 2 else []
+        total_cols = len(sample_r) + 2
         row4 = [""] * total_cols
         count = 1
         for col_idx in range(2, len(row4)):
             if count <= 81:
                 row4[col_idx] = str(count)
                 count += 1
-        processed.append(delimiter.join(row4))
+        processed_rows.append(row4)
 
-        # --- BƯỚC 4: Xử lý các dòng dữ liệu từ dòng 5 trở đi (thêm STT) ---
+        # --- BƯỚC 4: Xử lý các dòng dữ liệu từ dòng 5 trở đi (thêm STT vào trước cột B và trước cột D) ---
         stt = 1
-        for i in range(3, len(modified_lines)):
-            if not modified_lines[i].strip():
+        for i in range(3, len(rows)):
+            if not rows[i] or not any(rows[i]):
                 continue
-            parts = modified_lines[i].split(delimiter)
-            parts.insert(1, str(stt))
-            parts.insert(3, str(stt))
-            processed.append(delimiter.join(parts))
+            r = list(rows[i])
+            r.insert(1, str(stt))
+            r.insert(3, str(stt))
+            processed_rows.append(r)
             stt += 1
 
-        # --- BƯỚC 5: Ghi file kết quả ---
-        with open(output_path, 'w', encoding='utf-8-sig') as f:
-            f.write('\n'.join(processed))
+        # --- BƯỚC 5: Ghi file kết quả bằng csv.writer (tự động wrap ngoặc kép các trường chứa dấu phẩy) ---
+        with open(output_path, 'w', encoding='utf-8-sig', newline='') as f:
+            writer = csv.writer(f, delimiter=delimiter, quoting=csv.QUOTE_MINIMAL)
+            writer.writerows(processed_rows)
 
         return send_file(
             output_path, 
