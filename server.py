@@ -119,3 +119,39 @@ def upload_and_process():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
+    from flask import request, send_file
+import os
+from sheet_processor import process_and_fill_template
+
+@app.route('/api/process-and-copy', methods=['POST'])
+def api_process_and_copy():
+    try:
+        # 1. Kiểm tra xem n8n đã gửi đủ 2 file chưa (1 file datasheet, 1 file mẫu)
+        if 'datasheet' not in request.files or 'template' not in request.files:
+            return {"error": "Thiếu file datasheet hoặc file mẫu (template)"}, 400
+            
+        datasheet_file = request.files['datasheet']
+        template_file = request.files['template']
+        
+        # 2. Lưu tạm thời các file này vào thư mục hệ thống tạm (/tmp) trên server Render
+        ds_path = os.path.join('/tmp', datasheet_file.filename)
+        tp_path = os.path.join('/tmp', template_file.filename)
+        output_filename = f"Ket_qua_{template_file.filename}"
+        out_path = os.path.join('/tmp', output_filename)
+        
+        datasheet_file.save(ds_path)
+        template_file.save(tp_path)
+        
+        # 3. Gọi hàm xử lý copy dữ liệu từ sheet_processor.py
+        process_and_fill_template(ds_path, tp_path, out_path)
+        
+        # 4. Trả file kết quả ngược lại cho n8n
+        return send_file(
+            out_path, 
+            as_attachment=True, 
+            download_name=output_filename,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        
+    except Exception as e:
+        return {"error": str(e)}, 500
