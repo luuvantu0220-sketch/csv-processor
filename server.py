@@ -18,8 +18,8 @@ def upload_and_process():
     name, ext = os.path.splitext(filename)
     input_path = os.path.join('/tmp', filename)
     
-    # Tên file Excel đầu ra trả về cho n8n
-    output_filename = "Xu_ly_ket_qua_file_do.xlsx"
+    # Tên file Excel kết quả trả về tương ứng với tên file dữ liệu gốc
+    output_filename = f"Xu_ly_ket_qua_{name}.xlsx"
     output_path = os.path.join('/tmp', output_filename)
 
     file.save(input_path)
@@ -103,13 +103,22 @@ def upload_and_process():
                     formula = f"=MAX(ABS(E{row_num}-H{row_num}), ABS(F{row_num}-H{row_num}), ABS(G{row_num}-H{row_num}))/H{row_num}*100"
                     r[un_idx] = formula
 
-        # --- BƯỚC 3: GHI VÀO SHEET "Ket qua do" CỦA FILE EXCEL MẪU ---
-        template_excel = 'Xu ly du lieu file do.xlsx'
-        if os.path.exists(template_excel):
-            wb = openpyxl.load_workbook(template_excel)
-        else:
-            wb = openpyxl.Workbook()
-            wb.active.title = 'Ket qua do'
+        # --- BƯỚC 3: TỰ ĐỘNG TÌM FILE TEMPLATE EXCEL TƯƠNG ỨNG ---
+        # Danh sách các kiểu tên file template có thể khớp với tên file dữ liệu
+        possible_templates = [
+            f"Xu ly du lieu {name}.xlsx",
+            f"Xu ly du lieu {name.replace('_', ' ')}.xlsx",
+            f"{name}.xlsx",
+            "Xu ly du lieu file do.xlsx"  # File mặc định fallback cuối cùng
+        ]
+        
+        template_excel = "Xu ly du lieu file do.xlsx"
+        for t in possible_templates:
+            if os.path.exists(t):
+                template_excel = t
+                break
+
+        wb = openpyxl.load_workbook(template_excel)
 
         sheet_name = 'Ket qua do'
         if sheet_name in wb.sheetnames:
