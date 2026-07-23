@@ -18,8 +18,8 @@ def upload_and_process():
     name, ext = os.path.splitext(filename)
     input_path = os.path.join('/tmp', filename)
     
-    # Đổi đuôi file đầu ra thành .xlsx
-    output_filename = f"{name}_Da_Xu_Ly.xlsx"
+    # Tên file Excel đầu ra trả về cho n8n
+    output_filename = "Xu_ly_ket_qua_file_do.xlsx"
     output_path = os.path.join('/tmp', output_filename)
 
     file.save(input_path)
