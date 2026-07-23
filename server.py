@@ -155,3 +155,36 @@ def api_process_and_copy():
         
     except Exception as e:
         return {"error": str(e)}, 500
+        from flask import request, send_file
+import os
+from sheet_processor import process_with_embedded_template
+
+@app.route('/api/process-and-copy', methods=['POST'])
+def api_process_and_copy():
+    try:
+        # n8n chỉ cần gửi duy nhất file datasheet
+        if 'datasheet' not in request.files:
+            return {"error": "Thiếu file datasheet"}, 400
+            
+        datasheet_file = request.files['datasheet']
+        
+        # Lưu tạm file datasheet lên thư mục /tmp của Render
+        ds_path = os.path.join('/tmp', datasheet_file.filename)
+        output_filename = f"Ket_qua_{datasheet_file.filename}"
+        out_path = os.path.join('/tmp', output_filename)
+        
+        datasheet_file.save(ds_path)
+        
+        # Gọi hàm xử lý (tự động ghép với file mẫu đã có sẵn trên GitHub/Render)
+        process_with_embedded_template(ds_path, out_path)
+        
+        # Trả file kết quả về cho n8n
+        return send_file(
+            out_path, 
+            as_attachment=True, 
+            download_name=output_filename,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        
+    except Exception as e:
+        return {"error": str(e)}, 500
