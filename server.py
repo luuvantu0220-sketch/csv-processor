@@ -1,5 +1,6 @@
 import os
 import csv
+import openpyxl
 from flask import Flask, request, send_file
 
 app = Flask(__name__)
@@ -16,7 +17,9 @@ def upload_and_process():
     filename = file.filename
     name, ext = os.path.splitext(filename)
     input_path = os.path.join('/tmp', filename)
-    output_filename = f"{name}_Da_Xu_Ly.csv"
+    
+    # Đổi đuôi file đầu ra thành .xlsx
+    output_filename = f"{name}_Da_Xu_Ly.xlsx"
     output_path = os.path.join('/tmp', output_filename)
 
     file.save(input_path)
@@ -48,7 +51,7 @@ def upload_and_process():
         if not success or len(rows) < 3:
             return {'error': 'File rỗng hoặc ít hơn 3 dòng.'}, 400
 
-        # --- BƯỚC 1: XÂY DỰNG CẤU TRÚC BẢNG (THÊM HÀNG VÀ CỘT TRƯỚC) ---
+        # --- BƯỚC 1: XÂY DỰNG CẤU TRÚC BẢNG (THÊM HÀNG VÀ CỘT) ---
         processed_rows = []
 
         # 1. Xử lý 3 dòng tiêu đề đầu tiên (Chèn 2 cột rỗng vào index 1 và index 3)
@@ -71,7 +74,7 @@ def upload_and_process():
                 count += 1
         processed_rows.append(row4)
 
-        # 3. Xử lý các dòng dữ liệu từ dòng 5 trở đi (thêm STT vào index 1 và index 3)
+        # 3. Xử lý các dòng dữ liệu từ dòng 5 trở đi (thêm STT)
         stt = 1
         for i in range(3, len(rows)):
             if not rows[i] or not any(rows[i]):
@@ -82,7 +85,7 @@ def upload_and_process():
             processed_rows.append(r)
             stt += 1
 
-        # --- BƯỚC 2: ĐIỀN CÔNG THỨC VÀO ĐÚNG CỘT UN VỚI TỌA ĐỘ CỘT MỚI ---
+        # --- BƯỚC 2: ĐIỀN CÔNG THỨC VÀO ĐÚNG CỘT UN ---
         header = processed_rows[2] if len(processed_rows) > 2 else []
         un_idx = -1
         for idx, val in enumerate(header):
@@ -91,27 +94,59 @@ def upload_and_process():
                 break
 
         if un_idx != -1:
-            # Dữ liệu bắt đầu từ index 4 (tương ứng dòng 5 trong Excel, vì dòng 4 là hàng đếm số 1-81)
             for i in range(4, len(processed_rows)):
                 r = processed_rows[i]
                 if not r or not any(r):
                     continue
                 if len(r) > un_idx:
-                    row_num = i + 1  # Số dòng thực tế trên Excel (5, 6, 7...)
-                    # Sử dụng đúng tọa độ cột sau khi dịch chuyển: E (UA), F (UB), G (UC), H (UAvg)
+                    row_num = i + 1
                     formula = f"=MAX(ABS(E{row_num}-H{row_num}), ABS(F{row_num}-H{row_num}), ABS(G{row_num}-H{row_num}))/H{row_num}*100"
                     r[un_idx] = formula
 
-        # --- BƯỚC 3: GHI FILE KẾT QUẢ ---
-        with open(output_path, 'w', encoding='utf-8-sig', newline='') as f:
-            writer = csv.writer(f, delimiter=delimiter, quoting=csv.QUOTE_MINIMAL)
-            writer.writerows(processed_rows)
+        # --- BƯỚC 3: GHI VÀO SHEET "Ket qua do" CỦA FILE EXCEL MẪU ---
+        template_excel = 'Xu ly du lieu file do.xlsx'
+        if os.path.exists(template_excel):
+            wb = openpyxl.load_workbook(template_excel)
+        else:
+            wb = openpyxl.Workbook()
+            wb.active.title = 'Ket qua do'
+
+        sheet_name = 'Ket qua do'
+        if sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+        else:
+            ws = wb.create_sheet(sheet_name)
+
+        # Xóa dữ liệu cũ trên sheet này trước khi ghi mới
+        ws.delete_rows(1, ws.max_row + 1)
+
+        # Ghi dữ liệu dòng/cột vào worksheet
+        for r_idx, row in enumerate(processed_rows, start=1):
+            for c_idx, val in enumerate(row, start=1):
+                if isinstance(val, str) and val.startswith('='):
+                    ws.cell(row=r_idx, column=c_idx, value=val)
+                else:
+                    try:
+                        if val == '':
+                            cell_val = None
+                        elif '.' in val or 'e' in val.lower():
+                            cell_val = float(val)
+                        else:
+                            cell_val = int(val)
+                    except ValueError:
+                        cell_val = val
+                    ws.cell(row=r_idx, column=c_idx, value=cell_val)
+
+        wb.save(output_path)
+
+        if os.path.exists(input_path):
+            os.remove(input_path)
 
         return send_file(
             output_path, 
             as_attachment=True, 
             download_name=output_filename,
-            mimetype='text/csv'
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
 
     except Exception as e:
