@@ -1,9 +1,11 @@
 import os
 import csv
 from flask import Flask, request, send_file
+from sheet_processor import process_with_embedded_template
 
 app = Flask(__name__)
 
+# Route 1: Xử lý file CSV đơn
 @app.route('/upload-and-process', methods=['POST'])
 def upload_and_process():
     if 'file' not in request.files:
@@ -48,10 +50,9 @@ def upload_and_process():
         if not success or len(rows) < 3:
             return {'error': 'File rỗng hoặc ít hơn 3 dòng.'}, 400
 
-        # --- BƯỚC 1: XÂY DỰNG CẤU TRÚC BẢNG (THÊM HÀNG VÀ CỘT TRƯỚC) ---
         processed_rows = []
 
-        # 1. Xử lý 3 dòng tiêu đề đầu tiên (Chèn 2 cột rỗng vào index 1 và index 3)
+        # Xử lý 3 dòng tiêu đề đầu tiên
         for i in range(min(3, len(rows))):
             r = list(rows[i])
             while len(r) <= 1:
@@ -60,7 +61,7 @@ def upload_and_process():
             r.insert(3, "")
             processed_rows.append(r)
 
-        # 2. Tạo dòng thứ 4: Đếm từ 1 -> 81 bắt đầu từ ô C4
+        # Tạo dòng thứ 4: Đếm từ 1 -> 81
         sample_r = list(rows[2]) if len(rows) > 2 else []
         total_cols = len(sample_r) + 2
         row4 = [""] * total_cols
@@ -71,7 +72,7 @@ def upload_and_process():
                 count += 1
         processed_rows.append(row4)
 
-        # 3. Xử lý các dòng dữ liệu từ dòng 5 trở đi (thêm STT vào index 1 và index 3)
+        # Xử lý các dòng dữ liệu từ dòng 5 trở đi
         stt = 1
         for i in range(3, len(rows)):
             if not rows[i] or not any(rows[i]):
@@ -82,7 +83,7 @@ def upload_and_process():
             processed_rows.append(r)
             stt += 1
 
-        # --- BƯỚC 2: ĐIỀN CÔNG THỨC VÀO ĐÚNG CỘT UN VỚI TỌA ĐỘ CỘT MỚI ---
+        # Điền công thức vào cột Un
         header = processed_rows[2] if len(processed_rows) > 2 else []
         un_idx = -1
         for idx, val in enumerate(header):
@@ -91,18 +92,15 @@ def upload_and_process():
                 break
 
         if un_idx != -1:
-            # Dữ liệu bắt đầu từ index 4 (tương ứng dòng 5 trong Excel, vì dòng 4 là hàng đếm số 1-81)
             for i in range(4, len(processed_rows)):
                 r = processed_rows[i]
                 if not r or not any(r):
                     continue
                 if len(r) > un_idx:
-                    row_num = i + 1  # Số dòng thực tế trên Excel (5, 6, 7...)
-                    # Sử dụng đúng tọa độ cột sau khi dịch chuyển: E (UA), F (UB), G (UC), H (UAvg)
+                    row_num = i + 1
                     formula = f"=MAX(ABS(E{row_num}-H{row_num}), ABS(F{row_num}-H{row_num}), ABS(G{row_num}-H{row_num}))/H{row_num}*100"
                     r[un_idx] = formula
 
-        # --- BƯỚC 3: GHI FILE KẾT QUẢ ---
         with open(output_path, 'w', encoding='utf-8-sig', newline='') as f:
             writer = csv.writer(f, delimiter=delimiter, quoting=csv.QUOTE_MINIMAL)
             writer.writerows(processed_rows)
@@ -117,68 +115,24 @@ def upload_and_process():
     except Exception as e:
         return {'error': f"Lỗi xử lý file: {str(e)}"}, 500
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
-    from flask import request, send_file
-import os
-from sheet_processor import process_and_fill_template
 
+# Route 2: Xử lý và copy dữ liệu vào file mẫu Excel
 @app.route('/api/process-and-copy', methods=['POST'])
 def api_process_and_copy():
     try:
-        # 1. Kiểm tra xem n8n đã gửi đủ 2 file chưa (1 file datasheet, 1 file mẫu)
-        if 'datasheet' not in request.files or 'template' not in request.files:
-            return {"error": "Thiếu file datasheet hoặc file mẫu (template)"}, 400
-            
-        datasheet_file = request.files['datasheet']
-        template_file = request.files['template']
-        
-        # 2. Lưu tạm thời các file này vào thư mục hệ thống tạm (/tmp) trên server Render
-        ds_path = os.path.join('/tmp', datasheet_file.filename)
-        tp_path = os.path.join('/tmp', template_file.filename)
-        output_filename = f"Ket_qua_{template_file.filename}"
-        out_path = os.path.join('/tmp', output_filename)
-        
-        datasheet_file.save(ds_path)
-        template_file.save(tp_path)
-        
-        # 3. Gọi hàm xử lý copy dữ liệu từ sheet_processor.py
-        process_and_fill_template(ds_path, tp_path, out_path)
-        
-        # 4. Trả file kết quả ngược lại cho n8n
-        return send_file(
-            out_path, 
-            as_attachment=True, 
-            download_name=output_filename,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        )
-        
-    except Exception as e:
-        return {"error": str(e)}, 500
-        from flask import request, send_file
-import os
-from sheet_processor import process_with_embedded_template
-
-@app.route('/api/process-and-copy', methods=['POST'])
-def api_process_and_copy():
-    try:
-        # n8n chỉ cần gửi duy nhất file datasheet
         if 'datasheet' not in request.files:
             return {"error": "Thiếu file datasheet"}, 400
             
         datasheet_file = request.files['datasheet']
         
-        # Lưu tạm file datasheet lên thư mục /tmp của Render
         ds_path = os.path.join('/tmp', datasheet_file.filename)
         output_filename = f"Ket_qua_{datasheet_file.filename}"
         out_path = os.path.join('/tmp', output_filename)
         
         datasheet_file.save(ds_path)
         
-        # Gọi hàm xử lý (tự động ghép với file mẫu đã có sẵn trên GitHub/Render)
         process_with_embedded_template(ds_path, out_path)
         
-        # Trả file kết quả về cho n8n
         return send_file(
             out_path, 
             as_attachment=True, 
@@ -188,3 +142,7 @@ def api_process_and_copy():
         
     except Exception as e:
         return {"error": str(e)}, 500
+
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
